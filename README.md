@@ -66,9 +66,11 @@ public repository.
 To reproduce the evaluation, extract the BIAI-provided
 Round 2 ZIP into the repository root.
 
+
 Required directory structure:
 
-BIAI-SupplierGuard-AI/
+```text
+SupplierGuard-AI/
 ├── BIAI-AI-Engineer-Round2-Pack/
 │   └── sample-data/
 │       └── engineer/
@@ -78,11 +80,16 @@ BIAI-SupplierGuard-AI/
 │               ├── supplier-pack-01.pdf
 │               ├── ...
 │               └── supplier-pack-10.pdf
+├── src/
+│   └── supplierguard/
+├── tests/
 ├── app.py
 ├── evaluate.py
 ├── requirements.txt
-├── src/
-└── tests/
+├── README.md
+└── RESULTS.md
+```
+
 
 After placing the supplied files, install dependencies
 and run the application:
