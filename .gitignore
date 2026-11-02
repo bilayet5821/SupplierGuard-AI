@@ -1,0 +1,25 @@
+# Python environment
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# IDE settings
+.vscode/
+
+# Original BIAI assessment files
+/BIAI-AI-Engineer-Round2-Pack/
+
+# Locally generated evaluation data
+/artifacts/
+
+# Operating system files
+.DS_Store
+Thumbs.db
