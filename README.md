@@ -57,6 +57,49 @@ There are no tools, routers, retries, planning steps, or agent loops. Business l
 
 An unclear required value produces human review, never a guessed value. A present penalty that does not identify its percentage or order-value basis is also sent to review; a missing clause is rejected exactly as the rule requires. Four weeks is deterministically converted to 28 days.
 
+
+## Required Sample Data
+
+The original BIAI assessment files are not included in this
+public repository.
+
+To reproduce the evaluation, extract the BIAI-provided
+Round 2 ZIP into the repository root.
+
+Required directory structure:
+
+BIAI-SupplierGuard-AI/
+├── BIAI-AI-Engineer-Round2-Pack/
+│   └── sample-data/
+│       └── engineer/
+│           └── task1-procurement/
+│               ├── company-rules.md
+│               ├── purchase-request.csv
+│               ├── supplier-pack-01.pdf
+│               ├── ...
+│               └── supplier-pack-10.pdf
+├── app.py
+├── evaluate.py
+├── requirements.txt
+├── src/
+└── tests/
+
+After placing the supplied files, install dependencies
+and run the application:
+
+```bash
+python -m venv .venv
+source .venv/Scripts/activate
+python -m pip install -r requirements.txt
+python -m pytest -q
+python evaluate.py
+python -m streamlit run app.py
+```
+
+The application requires no API key or external inference
+service. It operates locally using the supplied data.
+
+
 ## Run locally (Windows 11 / Python 3.11)
 
 From the repository root:
