@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from supplierguard.models import CheckStatus  # noqa: E402
+from supplierguard.inputs import load_purchase_request  # noqa: E402
+from supplierguard.presentation import issue_details, recommendations_for_result  # noqa: E402
 from supplierguard.workflow import run_workflow  # noqa: E402
 
 
@@ -26,6 +28,7 @@ DEFAULT_DATA = (
 
 def evaluate_all(data_dir: Path) -> list[dict]:
     pr_csv = data_dir / "purchase-request.csv"
+    purchase_request = load_purchase_request(pr_csv)
     pdfs = sorted(data_dir.glob("supplier-pack-*.pdf"))
     if len(pdfs) != 10:
         raise ValueError(f"Expected exactly 10 supplier PDFs; found {len(pdfs)} in {data_dir}")
@@ -48,6 +51,11 @@ def evaluate_all(data_dir: Path) -> list[dict]:
                 "source_file": result.source_file,
                 "decision": result.decision.value,
                 "decision_reason": result.decision_reason,
+                "recommendations": recommendations_for_result(result, purchase_request),
+                "issue_details": [
+                    detail.as_dict()
+                    for detail in issue_details(result, purchase_request)
+                ],
                 "decisive_findings": decisive,
                 "result": result.model_dump(mode="json"),
             }

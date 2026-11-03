@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from decimal import Decimal
 from html import escape
@@ -17,11 +18,18 @@ from supplierguard.pdf import extract_pdf_pages  # noqa: E402
 from supplierguard.presentation import (  # noqa: E402
     business_explanation,
     business_summary,
-    recommended_next_action,
+    issue_details,
+    recommendations_for_result,
     rule_label,
     status_label,
     unique_evidence,
     unique_pages,
+)
+from supplierguard.reporting import audit_pdf_filename, generate_audit_pdf  # noqa: E402
+from supplierguard.uploads import (  # noqa: E402
+    MAX_UPLOAD_BYTES,
+    UploadValidationError,
+    evaluate_uploaded_pdf,
 )
 from supplierguard.workflow import run_workflow  # noqa: E402
 
@@ -89,6 +97,8 @@ st.markdown(
         padding: .9rem 1.05rem;
       }
       .sg-action__title {font-size: .82rem; font-weight: 750; margin-bottom: .25rem;}
+      .sg-action ol {margin: .35rem 0 0 1.2rem; padding: 0;}
+      .sg-action li {margin: .25rem 0;}
       .sg-kpi-grid {
         display: grid;
         gap: .85rem;
@@ -167,6 +177,15 @@ st.markdown(
       .sg-detail__label {font-size: .72rem; font-weight: 700; opacity: .68;}
       .sg-detail__value {font-weight: 650; line-height: 1.35; margin-top: .28rem; overflow-wrap: anywhere;}
       .sg-help {color: var(--text-color); font-size: .86rem; line-height: 1.5; opacity: .72;}
+      .sg-facts {
+        display: grid;
+        gap: .45rem;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        margin-top: .6rem;
+      }
+      .sg-fact {border-top: 1px solid rgba(128, 128, 128, .22); padding-top: .42rem;}
+      .sg-fact__label {font-size: .68rem; font-weight: 750; opacity: .62; text-transform: uppercase;}
+      .sg-fact__value {font-size: .84rem; line-height: 1.4; margin-top: .2rem;}
       .sg-note {
         background: rgba(55, 115, 180, .12);
         border: 1px solid rgba(80, 125, 175, .25);
@@ -184,10 +203,19 @@ st.markdown(
         margin: .45rem 0;
         padding: .7rem .9rem;
       }
+      [data-testid="stSegmentedControl"] {margin: .25rem 0 1rem;}
+      [data-testid="stSegmentedControl"] button {
+        font-size: .94rem;
+        font-weight: 750;
+        min-height: 44px;
+        padding-left: 1rem;
+        padding-right: 1rem;
+      }
       @media (max-width: 700px) {
         .block-container {padding-left: 1rem; padding-right: 1rem; padding-top: 2.25rem;}
         .sg-decision {padding: 1rem;}
         .sg-kpi-grid {grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));}
+        [data-testid="stSegmentedControl"] button {font-size: .8rem; padding-left: .55rem; padding-right: .55rem;}
       }
     </style>
     """,
@@ -198,6 +226,11 @@ st.markdown(
 @st.cache_data(show_spinner=False)
 def evaluate(pdf_path: str):
     return run_workflow(pdf_path, PR_CSV)
+
+
+@st.cache_data(show_spinner=False)
+def evaluate_upload(pdf_bytes: bytes, filename: str):
+    return evaluate_uploaded_pdf(pdf_bytes, filename, PR_CSV)
 
 
 def money(value):
@@ -241,12 +274,32 @@ def render_details(values: list[tuple[str, str | None]]) -> None:
 with st.sidebar:
     st.markdown("### SupplierGuard AI")
     st.caption("Offline, deterministic procurement compliance")
-    files = sorted(DATA_DIR.glob("supplier-pack-*.pdf"))
-    selected = st.selectbox(
-        "Supplier pack",
-        files,
-        format_func=lambda path: path.stem.replace("supplier-pack-", "Pack "),
+    source_mode = st.radio(
+        "Document source",
+        ["BIAI supplied samples", "Upload supplier PDF"],
     )
+    files = sorted(DATA_DIR.glob("supplier-pack-*.pdf"))
+    selected = None
+    uploaded_file = None
+    if source_mode == "BIAI supplied samples":
+        selected = st.selectbox(
+            "Supplier pack",
+            files,
+            format_func=lambda path: path.stem.replace("supplier-pack-", "Pack "),
+        )
+    else:
+        uploaded_file = st.file_uploader(
+            "Supplier quotation PDF",
+            type=["pdf"],
+            help=(
+                f"Maximum {MAX_UPLOAD_BYTES // (1024 * 1024)} MB and 10 pages. "
+                "Optimized for the supplied BIAI quotation format; "
+                "scans and arbitrary templates require human review."
+            ),
+        )
+        st.caption(
+            "Assessment note: test uploads only with copies or controlled modifications of the supplied BIAI samples."
+        )
     st.divider()
     st.markdown("**Fixed workflow**")
     st.caption("1. Read PDF pages\n\n2. Extract fields\n\n3. Apply rules\n\n4. Aggregate decision")
@@ -256,20 +309,39 @@ with st.sidebar:
     )
 
 st.markdown('<div class="sg-eyebrow">Aamar Garments Ltd · PR-2026-114</div>', unsafe_allow_html=True)
-st.title("Supplier document compliance review")
+st.title("Supplier Document Compliance Review")
 st.caption("Traceable decisions with page-level evidence. Missing or unclear values are never guessed.")
 
-if not files:
+if source_mode == "BIAI supplied samples" and not files:
     st.error("No supplied Task 1 PDF files were found.")
+    st.stop()
+if source_mode == "Upload supplier PDF" and uploaded_file is None:
+    st.info("Upload a text-based supplier quotation PDF to begin. No file is stored permanently.")
     st.stop()
 
 with st.spinner("Running the fixed compliance workflow…"):
-    result = evaluate(str(selected))
+    upload_metadata = None
+    if source_mode == "BIAI supplied samples":
+        result = evaluate(str(selected))
+    else:
+        try:
+            uploaded = evaluate_upload(uploaded_file.getvalue(), uploaded_file.name)
+        except UploadValidationError as exc:
+            st.error(str(exc))
+            st.warning(
+                "Result: Needs Human Review. SupplierGuard stopped before compliance validation because the file could not be interpreted reliably."
+            )
+            st.stop()
+        result = uploaded.result
+        upload_metadata = uploaded.metadata
 
 pack = result.extracted
-item = pack.items[0] if pack.items else None
+multi_item_upload = bool(upload_metadata and upload_metadata.detected_item_rows > 1)
+item = pack.items[0] if len(pack.items) == 1 and not multi_item_upload else None
 purchase_request = load_purchase_request(PR_CSV)
 requested_item = purchase_request.get(item.item_code) if item else None
+recommendations = recommendations_for_result(result, purchase_request)
+details = issue_details(result, purchase_request)
 decision_class = {
     Decision.APPROVE: "approve",
     Decision.REJECT: "reject",
@@ -285,8 +357,10 @@ st.markdown(
 )
 st.markdown(
     '<section class="sg-action">'
-    '<div class="sg-action__title">Recommended next action</div>'
-    f'<div>{escape(recommended_next_action(result.decision))}</div>'
+    '<div class="sg-action__title">Recommended action(s)</div>'
+    "<ol>"
+    + "".join(f"<li>{escape(action)}</li>" for action in recommendations)
+    + "</ol>"
     "</section>",
     unsafe_allow_html=True,
 )
@@ -301,18 +375,37 @@ render_kpis(
             (
                 f"{quantity(item.quantity)} {plural_unit(item.unit, item.quantity)}"
                 if item
-                else "Unknown"
+                else ("Multiple items — review" if multi_item_upload else "Unknown")
             ),
         ),
         ("Policy issues", str(len(result.exceptions))),
     ]
 )
 
-decision_tab, extraction_tab, audit_tab, source_tab = st.tabs(
-    ["Decision", "Extracted data", "Rule audit", "Source evidence"]
+report_bytes = generate_audit_pdf(result, purchase_request)
+download_column, note_column = st.columns([1, 2])
+with download_column:
+    st.download_button(
+        "Download Audit Report (PDF)",
+        data=report_bytes,
+        file_name=audit_pdf_filename(result),
+        mime="application/pdf",
+        type="primary",
+        use_container_width=True,
+    )
+with note_column:
+    st.caption(
+        "Professional A4 audit with procurement values, every policy check, exact evidence, and issue-specific actions."
+    )
+
+section = st.segmented_control(
+    "Review section",
+    ["Decision", "Extracted Data", "Rule Audit", "Source Evidence"],
+    default="Decision",
+    label_visibility="collapsed",
 )
 
-with decision_tab:
+if section == "Decision":
     st.subheader("Policy issues")
     if result.decision == Decision.APPROVE:
         st.markdown(
@@ -323,8 +416,11 @@ with decision_tab:
         )
     else:
         issue_order = {CheckStatus.REJECT: 0, CheckStatus.HUMAN_REVIEW: 1}
-        issues = sorted(result.exceptions, key=lambda finding: issue_order[finding.status])
-        for finding in issues:
+        issues = sorted(
+            zip(result.exceptions, details),
+            key=lambda pair: issue_order[pair[0].status],
+        )
+        for finding, detail in issues:
             issue_class = (
                 "reject" if finding.status == CheckStatus.REJECT else "review"
             )
@@ -337,10 +433,18 @@ with decision_tab:
                 f'<div class="sg-issue sg-issue--{issue_class}">'
                 '<div class="sg-issue__top">'
                 f'<span class="sg-status sg-status--{issue_class}">{issue_status}</span>'
-                f'<span class="sg-issue__name">{escape(rule_label(finding.rule_id))}</span>'
+                f'<span class="sg-issue__name">{escape(detail.issue_name)}</span>'
                 f'<span class="sg-reference">Policy reference {escape(finding.rule_id)}</span>'
                 "</div>"
                 f'<div>{escape(business_explanation(finding))}</div>'
+                '<div class="sg-facts">'
+                '<div class="sg-fact"><div class="sg-fact__label">Supplier value</div>'
+                f'<div class="sg-fact__value">{escape(detail.actual_value)}</div></div>'
+                '<div class="sg-fact"><div class="sg-fact__label">Policy requirement</div>'
+                f'<div class="sg-fact__value">{escape(detail.policy_requirement)}</div></div>'
+                '<div class="sg-fact"><div class="sg-fact__label">Measured difference</div>'
+                f'<div class="sg-fact__value">{escape(detail.measured_difference)}</div></div>'
+                "</div>"
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -352,7 +456,7 @@ with decision_tab:
             )
         st.caption("Open Rule audit for every check, policy reference, threshold explanation, and exact supporting quote.")
 
-with extraction_tab:
+if section == "Extracted Data":
     st.subheader("Document details")
     st.markdown(
         '<div class="sg-help">Values read from the supplier quotation. “Not shown” means the value was not found and was not guessed.</div>',
@@ -495,7 +599,7 @@ with extraction_tab:
         st.caption("Optional machine-readable view for technical review and debugging.")
         st.json(pack.model_dump(mode="json"))
 
-with audit_tab:
+if section == "Rule Audit":
     st.subheader("Policy audit")
     st.markdown(
         '<div class="sg-help">Every automated check is shown below. REJECT blocks the purchase; REVIEW requires a human check; PASS meets the stated policy. Rejection takes precedence over review issues.</div>',
@@ -545,19 +649,41 @@ with audit_tab:
                     unsafe_allow_html=True,
                 )
 
-with source_tab:
+if section == "Source Evidence":
     st.subheader("Source document text")
     st.markdown(
         '<div class="sg-help">Use this read-only page text to verify extracted values against the supplier PDF. Page numbering matches the original document.</div>',
         unsafe_allow_html=True,
     )
-    document = extract_pdf_pages(selected)
-    for page in document.pages:
-        with st.expander(f"Page {page.page} extracted text", expanded=page.page == 1):
-            st.text(page.text)
+    if upload_metadata is None:
+        source_pages = [
+            (page.page, page.text) for page in extract_pdf_pages(selected).pages
+        ]
+    else:
+        source_pages = list(enumerate(upload_metadata.page_texts, start=1))
+        st.caption(
+            f"Uploaded file: {upload_metadata.original_filename} · {upload_metadata.page_count} page(s) · "
+            f"SHA-256 {upload_metadata.sha256[:12]}… · processed temporarily and not retained"
+        )
+    for page_number, page_text in source_pages:
+        with st.expander(
+            f"Page {page_number} extracted text", expanded=page_number == 1
+        ):
+            st.text(page_text)
+
+    json_payload = {
+        "evaluation": result.model_dump(mode="json"),
+        "recommendations": recommendations,
+        "issue_details": [detail.as_dict() for detail in details],
+        "source": {
+            "mode": source_mode,
+            "filename": result.source_file,
+            "sha256": upload_metadata.sha256 if upload_metadata else None,
+        },
+    }
     st.download_button(
         "Download audit JSON",
-        data=result.model_dump_json(indent=2),
-        file_name=f"{selected.stem}-audit.json",
+        data=json.dumps(json_payload, indent=2, ensure_ascii=False),
+        file_name=audit_pdf_filename(result).replace(".pdf", ".json"),
         mime="application/json",
     )

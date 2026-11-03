@@ -1,32 +1,42 @@
-# SupplierGuard AI — Results and one-page engineering note
+# 🧾 SupplierGuard AI — Engineering Results & Limitations
 
-## What was built
+![Tests](https://img.shields.io/badge/Automated%20tests-88%20passed-238636?style=flat-square)
+![Documents](https://img.shields.io/badge/Sample%20PDFs-10%20evaluated-175CD3?style=flat-square)
+![Runtime](https://img.shields.io/badge/Runtime-CPU%20%7C%20Offline-0B7285?style=flat-square)
 
-A CPU-only local pipeline reads embedded PDF text page by page, deterministically extracts supplier identity, line item, quantities, prices, totals, delivery, payment, VAT, validity, and late-penalty terms, then applies the supplied rules using `Decimal`. A fixed LangGraph sequence orchestrates extraction, validation, and precedence aggregation. Streamlit exposes both the decision and its audit trail.
+> **BIAI AI Engineer — Round 2, Task 1** · Concise engineering note · **Last locally verified: 4 Nov 2026**
 
-## Actual results on the 10 supplied PDFs
+## 🔧 What I built
 
-| Pack | Result | Decisive rule(s) | Actual page-1 supporting text |
-|---|---|---|---|
-| 01 | Approve | All checks pass | “10% advance payable with the purchase order. Balance payable within 45 days after delivery…”; “Delivery within 24 days…”; “Late delivery penalty: 1% of order value…”; “VAT 15% 849,600.00” |
-| 02 | Approve | All checks pass | “No advance payment required. Full payment within 30 days of delivery.”; “within 21 days from the date of PO”; “0.75% of the order value per week” |
-| 03 | Reject | PRICE-001 | “C Polyester sewing thread, cone 800 cone 229.00 183,200.00” (PR maximum: BDT 210.00; 9.05% over) |
-| 04 | Needs Human Review | PRICE-001 | “D Poly bag, 30 x 40 cm 50,000 piece 6.65 332,500.00” (PR maximum: BDT 6.50; 2.31% over) |
-| 05 | Reject | PAY-ADV-001 | “40% advance payable with the purchase order. 40% advance with the purchase order, balance 60% within 30 days of delivery.” |
-| 06 | Reject | PENALTY-001 | “2. Delivery. Delivery within 27 days of PO.” is followed by “3. Validity. This quotation is valid for 30 days…”; no delay-penalty clause is present |
-| 07 | Needs Human Review | QTY-001 | “B Metal zipper, 18 cm 16,500 piece 35.00 577,500.00” (PR quantity: 20,000; 17.50% variance) |
-| 08 | Reject | ID-001 | “Supplier registration details available on request.”; neither a TIN nor BIN is shown |
-| 09 | Needs Human Review | PAY-TERM-001, MATH-001 | “Payment within 30 to 90 days as agreed by both parties.”; “50,000 … 6.40 322,000.00” (multiplication equals 320,000.00) |
-| 10 | Reject | DELIVERY-001 | “Delivery within 60 days of PO.” A secondary review issue is “Unit price (BDT, VAT included)” / “Total (all taxes included)” because VAT is not separately shown |
+**SupplierGuard AI** is a local supplier-quotation checker for the fictional BIAI procurement pack. **PyMuPDF** extracts page-level text; deterministic parsing and **Pydantic** models capture supplier details, item/quantity/price, payment, VAT, delivery, registration and validity. **Decimal** arithmetic compares quotations with the supplied purchase request and company rules. A **fixed LangGraph sequence** produces **Approve**, **Reject**, or **Needs Human Review** (`Reject > Review > Approve`) with cited source evidence. A **Streamlit dashboard** displays plain-English explanations and finding-specific actions. The updated version includes **supported-format PDF uploads**, **A4 ReportLab audit downloads**, and JSON audit export. No runtime LLM, external API, or GPU is used.
 
-Decision distribution: **2 Approve, 5 Reject, 3 Needs Human Review**.
+## 📊 Actual results — 10 supplied PDFs
 
-The repository contains no official expected-label file. I manually applied `company-rules.md` to form the transparent oracle above, then encoded it as regression assertions. The implemented system agrees on **10/10** packs with that oracle. This is not represented as accuracy against hidden ground truth.
+| Pack | Decision | Key finding |
+|---|---|---|
+| 01 | ✅ Approve | All required checks passed |
+| 02 | ✅ Approve | All required checks passed |
+| 03 | ❌ Reject | Unit price **9.05%** above maximum |
+| 04 | ⚠️ Human Review | Unit price **2.31%** above maximum |
+| 05 | ❌ Reject | **40%** advance exceeds policy |
+| 06 | ❌ Reject | Required delay-penalty clause absent |
+| 07 | ⚠️ Human Review | Quoted quantity **17.50%** below requested |
+| 08 | ❌ Reject | Supplier **TIN / BIN** missing |
+| 09 | ⚠️ Human Review | Ambiguous **30–90 day** payment; arithmetic mismatch |
+| 10 | ❌ Reject | **60-day** delivery; VAT not separately itemized |
 
-## How it was tested
+**Distribution:** 🟢 **2 Approve** · 🔴 **5 Reject** · 🟠 **3 Needs Human Review**. All **10/10** outcomes match a **documented manual interpretation of the supplied rules**. BIAI supplied **no official label file**; this is *rules-oracle agreement*, **not** accuracy against an independent hidden ground truth.
 
-`python -m pytest -q` passes **56 tests** covering page extraction, typed fields, genuine page evidence, VAT-included handling, unclear range terms, week conversion, every requested price/quantity/advance/delivery/payment/penalty/validity boundary, arithmetic and VAT failures, missing identifiers, conservative missing-value handling, rejection precedence, modified temporary PDFs, filename independence, fixed graph topology, all ten decisions, UI presentation helpers, and Streamlit rendering. The Streamlit process also passed a local `/_stcore/health` smoke check and 1440×1000 browser captures at 100% scale in light and dark themes. Generated details are in `artifacts/evaluation-results.json` and `artifacts/evaluation-summary.csv`.
+## 🧪 Testing and evidence
 
-## What does not work well / what comes next
+**Latest local verification:** `python -m pytest -q` → **88 passed, 14 dependency warnings, 0 failures**; `python evaluate.py` → **10 documents, unchanged 2/5/3 distribution**. Tests cover rule thresholds and precedence, PDF extraction and page evidence, modified copies of supplied samples, upload safety, recommendations, PDF report generation, and presentation. A supplied **Pack 04 copy** uploaded through the new path returned **Human Review** for the 2.31% price exception; **Pack 07** showed a quantity-specific next action. Report-generation tests covered all three decision categories. These results support the sample workflow, not arbitrary vendor documents.
 
-The parser is intentionally optimized for the supplied text-based quote layout; it does not perform OCR or generalize to arbitrary vendor templates. Natural-language clauses outside tested patterns will stop for human review. With production data, I would add OCR confidence, layout/table models, policy versioning, security limits, reviewer feedback, and a labelled multi-template evaluation set. Optional local-LLM extraction could be added only as a candidate generator; every numeric and compliance field would still require independent deterministic verification.
+## ⚠️ What does not work well
+
+The parser targets **text-based BIAI quotation layouts** rather than arbitrary supplier templates. **OCR is not supported**; corrupt, encrypted, image-only, ambiguous, and unsupported multi-item documents are handled conservatively instead of silently approved. No actual human approvals are recorded. The app uses a deterministic rules pipeline, **not an inference-time LLM**. The sample data and generated evidence artifacts are intentionally excluded from the public repository.
+
+## 🚀 What I would do next
+
+For production use: add validated OCR and table extraction, more diverse labelled vendor samples, reviewer sign-off with audit identities, versioned company policies, stronger upload/security controls, and monitoring. **Before any rollout**, independently evaluate false approvals and human-review rates across real approved test data (not used in this assessment).
+
+**Reproduce:** See [README.md](README.md) for sample-pack placement and commands. The downloadable PDF audit report includes full field values, all rule results, page evidence, and corrective recommendations.

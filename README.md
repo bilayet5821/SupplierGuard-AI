@@ -1,77 +1,114 @@
-# SupplierGuard AI
+# 🛡️ SupplierGuard AI
 
-SupplierGuard is a local, deterministic compliance checker for the supplied BIAI Task 1 procurement packs. It extracts each PDF page, structures the commercial fields, applies the exact company rules, and returns **Approve**, **Reject**, or **Needs Human Review** with page-numbered source quotations.
+**Evidence-backed supplier quotation compliance, built for reliable procurement decisions.**
 
-It uses no paid API, no network service, no LLM, and no autonomous agent. Task 2 is intentionally untouched.
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)
+![LangGraph](https://img.shields.io/badge/Workflow-LangGraph-5555A5?style=flat-square)
+![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)
+![PDF Reports](https://img.shields.io/badge/Reports-ReportLab-175CD3?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-88%20passed-238636?style=flat-square)
+![Offline](https://img.shields.io/badge/Runtime-Offline%20%7C%20CPU--only-0B7285?style=flat-square)
 
-## Results at a glance
+> **BIAI AI Engineer — Round 2, Task 1.** SupplierGuard reads the assessment's supplier quotation PDFs, checks the associated purchase request and company policy, and returns **Approve**, **Reject**, or **Needs Human Review**—with reasons, source-page evidence, and next actions. The automated result **does not constitute human purchase authorization**.
 
-The workflow processed all 10 supplied PDFs: **2 Approve, 5 Reject, and 3 Needs Human Review**. Its decisions agree on **10/10 packs** with the manually derived rules oracle documented in [RESULTS.md](RESULTS.md). The sample set contains no official label file, so this is transparent rules-oracle agreement, not a claim of accuracy against undisclosed ground truth.
+**[Features](#-features) · [Results](#-evaluation-results) · [Setup](#-quick-start) · [Workflow](#-architecture) · [Limitations](#-limitations-and-engineering-choices)**
 
-## Architecture
+## ✨ Features
+
+| Capability | What a procurement employee gets |
+|---|---|
+| 📄 **Supplier document extraction** | Supplier, item, quantity, unit price, totals, payment, VAT, delivery lead time, validity, and registration identifiers |
+| ⚖️ **Policy validation** | Purchase-request comparison, precise `Decimal` arithmetic, and a transparent rule-by-rule audit |
+| 🟢🟥🟡 **Three-way decision** | **Approve / Reject / Needs Human Review**, with `Reject > Review > Approve` precedence |
+| 🧭 **Finding-specific actions** | Recommendations tied to actual violations, including multiple issues in the same quotation |
+| ⬆️ **Supplier PDF upload** | Inspect an additional PDF in the **supported sample format**, using the same fixed workflow |
+| 📥 **A4 PDF audit report** | Download an employee-readable report with decision, values, checks, evidence, and next actions |
+| 🔎 **Traceable evidence** | Exact text excerpts tied to PDF page numbers, plus a JSON audit export |
+| 🖥️ **Accessible dashboard** | Streamlit views for **Decision**, **Extracted Data**, **Rule Audit**, and **Source Evidence** |
+
+The application runs **locally on a CPU**. No API key, hosted inference, model training, external AI call, or autonomous agent is used at runtime. AI coding tools were permitted for development; the shipped decision engine itself is **deterministic**, not an inference-time LLM.
+
+## 📊 Evaluation results
+
+![Approve](https://img.shields.io/badge/Approve-2-238636?style=flat-square)
+![Reject](https://img.shields.io/badge/Reject-5-C62828?style=flat-square)
+![Human Review](https://img.shields.io/badge/Needs%20Human%20Review-3-B7791F?style=flat-square)
+
+All **10 BIAI-supplied PDFs** were processed with the same workflow. The resulting labels agree with the documented **manual rules oracle on 10/10 packs**. **This is not a claim of accuracy against an official or hidden ground-truth answer key**; BIAI did not provide one.
+
+| Packs | Decision | Representative reason |
+|---|---|---|
+| 01, 02 | ✅ Approve | Required checks passed |
+| 03, 05, 06, 08, 10 | ❌ Reject | Excess price / advance, missing penalty or registration, late delivery |
+| 04, 07, 09 | ⚠️ Needs Human Review | Price tolerance, quantity deviation, unclear payment or arithmetic |
+
+**Latest locally verified run:** `88 passed, 14 warnings` (`python -m pytest -q`), with the same **2 / 5 / 3** evaluation distribution after the feature upgrades. Warnings are dependency deprecations, not test failures. See [RESULTS.md](RESULTS.md) for the engineering summary.
+
+## 🧩 Architecture
 
 ```text
-supplier PDF + purchase-request.csv
-              │
-              ▼
-     page-level PyMuPDF text
-              │
-              ▼
- deterministic field extraction ──► Pydantic + Decimal models
-              │
-              ▼
- deterministic company-rule checks
-              │
-              ▼
- Reject > Needs Human Review > Approve
-              │
-              ▼
- Streamlit UI / JSON and CSV evaluation artifacts
+Supplied PDF or supported uploaded PDF
+                 │
+       Upload / PDF safety checks
+                 │
+                 ▼
+        Page-level PyMuPDF text
+                 │
+                 ▼
+      Deterministic field extraction
+          Pydantic + Decimal
+                 │
+                 ▼
+      Purchase request comparison
+                 │
+                 ▼
+       Company policy rule checks
+                 │
+                 ▼
+   Reject > Needs Human Review > Approve
+                 │
+       ┌─────────┼───────────┐
+       ▼         ▼           ▼
+   Streamlit  A4 PDF audit   JSON / CSV
+   dashboard  + actions     evidence
 ```
 
-LangGraph implements one fixed acyclic path:
+The core orchestration is a **fixed, acyclic LangGraph** path:
 
 ```text
 START → load_inputs → extract_fields → validate_rules → aggregate_decision → END
 ```
 
-There are no tools, routers, retries, planning steps, or agent loops. Business logic remains in pure functions so it can be tested independently of orchestration and UI.
+There is no open-ended agent planner or tool-calling loop. Extraction, validation, presentation, and reporting are separated so policy decisions can be tested independently. Unclear, unsupported, or missing required fields **must never be guessed or silently approved**.
 
-## Rule implementation
+## 📋 Implemented company-rule checks
 
-| Precedence | Condition | Result |
+| Severity | Policy condition | Outcome |
 |---|---|---|
-| 1 | Unit price is more than 3% over maximum | Reject |
-| 1 | Advance is more than 20% | Reject |
-| 1 | No late-delivery penalty; a stated rate below 0.5%/week is noncompliant | Reject |
-| 1 | TIN or BIN missing | Reject |
-| 1 | Delivery later than 45 days after PO | Reject |
-| 2 | Unit price over maximum by no more than 3% | Needs Human Review |
-| 2 | Absolute quantity variance over 5% | Needs Human Review |
-| 2 | Payment unclear or outside inclusive 30–60 days after delivery | Needs Human Review |
-| 2 | Delivery in inclusive 31–45 day range | Needs Human Review |
-| 2 | VAT not separately shown at 15% | Needs Human Review |
-| 2 | Line, subtotal, VAT, or total arithmetic mismatch | Needs Human Review |
-| 2 | Validity under 30 days | Needs Human Review |
-| 3 | No exception | Approve |
+| 🔴 | Unit price **more than 3%** above PR maximum | Reject |
+| 🔴 | Advance **more than 20%** | Reject |
+| 🔴 | Missing required late-delivery penalty clause, or a stated penalty below **0.5%/week** | Reject |
+| 🔴 | Missing supplier TIN or BIN | Reject |
+| 🔴 | Delivery **over 45 days** after purchase order | Reject |
+| 🟠 | Price above maximum but **no more than 3%** above | Human Review |
+| 🟠 | Absolute quoted-quantity variance **over 5%** | Human Review |
+| 🟠 | Payment terms unclear or outside **30–60 days** after delivery | Human Review |
+| 🟠 | Delivery **31–45 days** after purchase order | Human Review |
+| 🟠 | **15% VAT** not shown separately | Human Review |
+| 🟠 | Line, subtotal, VAT, or final-total arithmetic mismatch | Human Review |
+| 🟠 | Quotation validity **under 30 days** | Human Review |
+| 🟢 | No applicable exception | Approve |
 
-An unclear required value produces human review, never a guessed value. A present penalty that does not identify its percentage or order-value basis is also sent to review; a missing clause is rejected exactly as the rule requires. Four weeks is deterministically converted to 28 days.
+Rejection has precedence when multiple issues occur; other findings remain visible. Four weeks is normalized to 28 days where supported by the source wording. Delivery lead times are **not converted to invented calendar dates** when a purchase-order date is absent. The supplied `company-rules.md` is the policy source of truth.
 
+## 🗂️ Required assessment data
 
-## Required Sample Data
-
-The original BIAI assessment files are not included in this
-public repository.
-
-To reproduce the evaluation, extract the BIAI-provided
-Round 2 ZIP into the repository root.
-
-
-Required directory structure:
+**The original BIAI brief, rules, purchase request, and supplier PDFs are not published in this public repository.** Evaluators should use the BIAI-provided ZIP, extracted alongside `app.py` in the repository root:
 
 ```text
 SupplierGuard-AI/
 ├── BIAI-AI-Engineer-Round2-Pack/
+│   ├── BIAI-AI-Engineer-Round2-Brief.md
 │   └── sample-data/
 │       └── engineer/
 │           └── task1-procurement/
@@ -80,8 +117,7 @@ SupplierGuard-AI/
 │               ├── supplier-pack-01.pdf
 │               ├── ...
 │               └── supplier-pack-10.pdf
-├── src/
-│   └── supplierguard/
+├── src/supplierguard/
 ├── tests/
 ├── app.py
 ├── evaluate.py
@@ -90,95 +126,114 @@ SupplierGuard-AI/
 └── RESULTS.md
 ```
 
+**Do not test with real supplier, company, or customer data for this hiring exercise.** Uploaded-file demonstrations should use copies or controlled modifications of the BIAI-supplied fictional samples only.
 
-After placing the supplied files, install dependencies
-and run the application:
+## 🚀 Quick start
+
+**Requirements:** Windows / macOS / Linux, a working Python installation (Python **3.11** recommended), and the assessment files placed as shown above. The app uses CPU only; no GPU or paid credentials are needed.
+
+### Option A — Windows Git Bash
 
 ```bash
+# From your chosen working directory
+git clone https://github.com/bilayet5821/SupplierGuard-AI.git
+cd SupplierGuard-AI
+
+# Extract the supplied BIAI ZIP here before running the app
 python -m venv .venv
 source .venv/Scripts/activate
 python -m pip install -r requirements.txt
-python -m pytest -q
-python evaluate.py
 python -m streamlit run app.py
 ```
 
-The application requires no API key or external inference
-service. It operates locally using the supplied data.
-
-
-## Run locally (Windows 11 / Python 3.11)
-
-From the repository root:
+### Option B — Windows PowerShell
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m streamlit run app.py
+git clone https://github.com/bilayet5821/SupplierGuard-AI.git
+cd SupplierGuard-AI
+
+# Extract the supplied BIAI ZIP here before running the app
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-Open the local URL printed by Streamlit. Select any of the ten supplied packs in the sidebar. The app shows the final decision, extracted values, every rule result, exact page-level evidence, raw extracted text, and a downloadable audit JSON.
+Open the **Local URL** printed by Streamlit (commonly `http://localhost:8501`; your port may differ). `localhost` is **not a publicly accessible demo link**.
 
-No environment variables or API keys are required. The application is sized for CPU-only use and loads one small PDF at a time.
+### Using the dashboard
 
-## Test and reproduce the evaluation
+1. In **Document source**, choose **BIAI supplied samples** or **Upload supplier PDF**.
+2. Select a supplied pack, or upload a **supported, text-based sample-format PDF**.
+3. Review **Final decision**, supplier values, policy issues, and **finding-specific recommended actions**.
+4. Switch among **Decision**, **Extracted Data**, **Rule Audit**, and **Source Evidence**.
+5. Select **Download Audit Report (PDF)** for a formatted A4 report; JSON audit data is also available for technical inspection.
 
-```powershell
-python -m pytest -q
-python evaluate.py
-```
+The upload path validates PDF input and handles invalid, encrypted, empty, image-only, or unsupported files conservatively. It is **not a general-purpose arbitrary-template parser**. A PDF that cannot be reliably processed must not be treated as approved.
 
-Git Bash equivalent:
+## 🧪 Tests and reproducible evaluation
+
+With the environment active and supplied files in place:
 
 ```bash
-python -m pip install -r requirements.txt
 python -m pytest -q
 python evaluate.py
-python -m streamlit run app.py
 ```
 
-The evaluation command requires exactly ten `supplier-pack-*.pdf` files and writes:
-
-- `artifacts/evaluation-results.json` — complete extracted models, rule findings, and evidence.
-- `artifacts/evaluation-summary.csv` — compact decision summary.
-
-The supplied input files are opened read-only and are never rewritten. Runtime decisions use document content and purchase-request item codes; filenames are used only to discover the supplied PDFs. Test expectations are an independent manual oracle, not production decision logic.
-
-## Project structure
+The latest provided local outputs were:
 
 ```text
-src/supplierguard/
-  models.py       Typed Pydantic audit models
-  pdf.py          Page-level PyMuPDF extraction
-  inputs.py       Purchase-request CSV loader
-  extraction.py   Deterministic field and terms parser
-  validation.py   Decimal arithmetic, rules, precedence
-  workflow.py     Fixed sequential LangGraph
-  service.py      Small public service API
-tests/             Extraction, boundary, evidence, graph, and 10-pack tests
-app.py             Streamlit dashboard
-evaluate.py        Reproducible batch evaluation
-RESULTS.md         One-page results and limitations note
-requirements.txt   Pinned direct dependencies
-artifacts/          Reproducible generated outputs
+88 passed, 14 warnings
+Evaluated 10 documents
+Approve: 2
+Reject: 5
+Needs Human Review: 3
 ```
 
-## Extraction and evidence design
+`evaluate.py` creates local files (intentionally ignored by Git):
 
-- PyMuPDF reads embedded text separately for each page.
-- Regex parsing is deliberately constrained to the supplied quote layout; it does not invent absent fields.
-- Monetary values use `Decimal`, including thresholds and arithmetic checks.
-- Each extracted clause and line retains `{page, quote}` evidence.
-- Pydantic models make missing values explicit with `None`.
-- All rule findings—passes as well as exceptions—remain in the audit result.
+- `artifacts/evaluation-results.json` — extracted data, findings, and source evidence.
+- `artifacts/evaluation-summary.csv` — one-row-per-pack decision summary.
 
-## Honest limitations and next steps
+The tests cover original samples, rule boundaries, evidence integrity, derived PDF modifications, upload safeguards, finding-specific recommendations, reporting, and UI helpers. This evaluation does **not** establish performance on unrelated real-world document layouts.
 
-- The supplied PDFs contain embedded text. Image-only scans are detected as missing extraction and sent for review, but OCR is not included to keep this submission lightweight.
-- The parser targets the supplied quotation structure and commercial wording. More layout diversity would require table-region detection and a larger labelled regression set.
-- Dates are retained exactly as printed; delivery is expressed relative to PO in these samples, so no PO date is fabricated.
-- Penalty language without an explicit order-value basis is conservatively reviewed.
-- There is no official ground-truth label file. The reported 10/10 figure is agreement with a documented manual reading of the supplied rules.
-- In production, add PDF malware controls, file-size/page limits, OCR confidence, schema/versioned policies, reviewer overrides with audit identity, and monitoring on a larger representative corpus.
+## 📁 Project structure
+
+```text
+app.py                     Streamlit UI and download controls
+evaluate.py                Batch evaluation of the 10 supplied packs
+src/supplierguard/
+  models.py                Typed Pydantic data and findings
+  pdf.py                   Page-level PDF text extraction
+  inputs.py                Purchase-request CSV loading
+  extraction.py            Deterministic field extraction
+  validation.py            Compliance rules and precedence
+  workflow.py              Fixed sequential LangGraph
+  service.py               Service entry points
+  presentation.py          Plain-English explanations and recommendations
+  uploads.py               Uploaded-PDF validation and safety checks
+  reporting.py             Professional ReportLab audit PDFs
+tests/                     Unit, boundary, upload, report, and regression tests
+RESULTS.md                 Engineering results and limitations
+requirements.txt           Pinned project dependencies
+```
+
+## ⚠️ Limitations and engineering choices
+
+- **Deterministic, not generative:** No inference-time LLM or autonomous agent is used. This supports reproducibility and reduces unsupported approval decisions, but limits natural-language generalization.
+- **Layout scope:** Extraction is optimized for the provided **text-based quotation layouts**. Unfamiliar templates, scanned/image-only PDFs, and complex multi-item documents may be rejected at intake or require human review; OCR is not included.
+- **Human authority:** **Approve** means automated policy checks passed, **not** that a procurement officer approved or placed an order.
+- **Evidence integrity:** Values and issue explanations are tied to source-page quotations. Missing or ambiguous information is not filled in by inference.
+- **Evaluation scope:** The **10/10** result is agreement with a manual rules oracle—not independent hidden-label accuracy or production validation.
+- **Deployment:** Production use would need authentication, secure document storage, malware scanning, audit identities, policy versioning, monitoring, and testing on a larger representative dataset. No production deployment claim is made here.
+
+## 📌 Assessment deliverables
+
+- ✅ Reproducible code and setup instructions
+- ✅ Ten-document evaluation and transparent results
+- ✅ Human-readable PDF audit export and finding-level recommendations
+- 📹 **Loom walkthrough (5 minutes or less):** to be provided with the hiring submission
+- 📝 **One-page technical note:** see [RESULTS.md](RESULTS.md) (check one-page pagination if exporting for submission)
+
+---
+
+**Scope:** BIAI AI Engineer Round 2 — Task 1 only. Assessment data remains outside the public repository.

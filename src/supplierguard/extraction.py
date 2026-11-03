@@ -31,6 +31,18 @@ def _ev(page: int, quote: str) -> Evidence:
     return Evidence(page=page, quote=_compact(quote))
 
 
+def _page_evidence(page_texts: list[tuple[int, str]], quote: str) -> Evidence:
+    compact_quote = _compact(quote)
+    for page_number, page_text in page_texts:
+        if compact_quote in page_text:
+            return _ev(page_number, compact_quote)
+    prefix = compact_quote[:80]
+    for page_number, page_text in page_texts:
+        if prefix and prefix in page_text:
+            return _ev(page_number, compact_quote)
+    return _ev(page_texts[0][0], compact_quote)
+
+
 def _extract_clauses(text: str) -> dict[str, str]:
     clauses: dict[str, str] = {}
     pattern = re.compile(
@@ -49,14 +61,13 @@ def extract_supplier_pack(document: PdfDocument) -> ExtractedSupplierPack:
     """Parse the supplied quote format with deterministic patterns only."""
     page_texts = [(page.page, _compact(page.text)) for page in document.pages]
     combined = " ".join(text for _, text in page_texts)
-    first_page = page_texts[0][0]
     evidence: dict[str, list[Evidence]] = {}
     uncertainties: list[str] = []
 
     supplier_match = _match(r"^(.+?)\s+QUOTATION\b", combined)
     supplier_name = supplier_match.group(1).strip() if supplier_match else None
     if supplier_match:
-        evidence["supplier_name"] = [_ev(first_page, supplier_match.group(1))]
+        evidence["supplier_name"] = [_page_evidence(page_texts, supplier_match.group(1))]
     else:
         uncertainties.append("Supplier name could not be extracted.")
 
@@ -68,7 +79,7 @@ def extract_supplier_pack(document: PdfDocument) -> ExtractedSupplierPack:
     quotation_number = quotation_date = reference = None
     if header_match:
         quotation_number, quotation_date, reference = header_match.groups()
-        evidence["header"] = [_ev(first_page, header_match.group(0))]
+        evidence["header"] = [_page_evidence(page_texts, header_match.group(0))]
     else:
         uncertainties.append("Quotation number, date, or reference could not be extracted.")
 
@@ -90,7 +101,7 @@ def extract_supplier_pack(document: PdfDocument) -> ExtractedSupplierPack:
                 amount_bdt=_decimal(match.group(6)),
             )
         )
-        evidence.setdefault("items", []).append(_ev(first_page, quote))
+        evidence.setdefault("items", []).append(_page_evidence(page_texts, quote))
     if not items:
         uncertainties.append("No complete quotation line item could be extracted.")
 
@@ -103,7 +114,7 @@ def extract_supplier_pack(document: PdfDocument) -> ExtractedSupplierPack:
     total = _decimal(total_match.group(1)) if total_match else None
     totals_quotes = [m.group(0) for m in (subtotal_match, vat_match, total_match) if m]
     if totals_quotes:
-        evidence["totals"] = [_ev(first_page, quote) for quote in totals_quotes]
+        evidence["totals"] = [_page_evidence(page_texts, quote) for quote in totals_quotes]
 
     identifier_match = _match(
         r"Supplier\s+TIN:\s*([A-Za-z0-9-]+)\s+BIN:\s*([A-Za-z0-9-]+)", combined
@@ -111,15 +122,15 @@ def extract_supplier_pack(document: PdfDocument) -> ExtractedSupplierPack:
     tin = bin_number = None
     if identifier_match:
         tin, bin_number = identifier_match.groups()
-        evidence["identifiers"] = [_ev(first_page, identifier_match.group(0))]
+        evidence["identifiers"] = [_page_evidence(page_texts, identifier_match.group(0))]
     else:
         registration_match = _match(r"Supplier registration details[^.]*\.", combined)
         if registration_match:
-            evidence["identifiers"] = [_ev(first_page, registration_match.group(0))]
+            evidence["identifiers"] = [_page_evidence(page_texts, registration_match.group(0))]
 
     clauses = _extract_clauses(combined)
     for name, quote in clauses.items():
-        evidence[name] = [_ev(first_page, quote)]
+        evidence[name] = [_page_evidence(page_texts, quote)]
 
     payment = clauses.get("payment", "")
     advance_matches = re.findall(r"(\d+(?:\.\d+)?)%\s+advance", payment, re.IGNORECASE)

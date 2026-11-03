@@ -71,9 +71,24 @@ def test_procurement_labels_and_actions_are_business_friendly(task_data):
 def test_streamlit_app_renders_without_exceptions():
     app = AppTest.from_file("app.py").run(timeout=30)
     assert not app.exception
-    assert app.title[0].value == "Supplier document compliance review"
+    assert app.title[0].value == "Supplier Document Compliance Review"
     markup = "\n".join(element.value for element in app.markdown)
     assert "sg-kpi-grid" in markup
     assert "sg-decision__summary" in markup
-    assert "Recommended next action" in markup
+    assert "Recommended action(s)" in markup
     assert "Policy issues" in markup
+    assert app.button_group[0].value == "Decision"
+    assert len(app.get("download_button")) == 1
+
+
+def test_all_navigation_sections_render():
+    app = AppTest.from_file("app.py").run(timeout=30)
+    expected_headings = {
+        "Extracted Data": "Document details",
+        "Rule Audit": "Policy audit",
+        "Source Evidence": "Source document text",
+    }
+    for section, heading in expected_headings.items():
+        app.button_group[0].set_value([section]).run(timeout=30)
+        assert not app.exception
+        assert heading in [element.value for element in app.subheader]
