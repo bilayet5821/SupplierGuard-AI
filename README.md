@@ -28,6 +28,24 @@
 
 The application runs **locally on a CPU**. No API key, hosted inference, model training, external AI call, or autonomous agent is used at runtime. AI coding tools were permitted for development; the shipped decision engine itself is **deterministic**, not an inference-time LLM.
 
+## 🚀 Live Demo
+
+**Try SupplierGuard AI:**  
+https://supplierguard-ai.streamlit.app/
+
+SupplierGuard AI is an explainable procurement compliance system built with Python, LangGraph, Streamlit, and deterministic rule validation.
+
+### How to Try the Demo
+1. Open the live application.
+2. Upload the BIAI-provided `purchase-request.csv`.
+3. Upload a supported supplier quotation PDF.
+4. Review the **Approve**, **Reject**, or **Needs Human Review** decision.
+5. Explore the policy audit and download the professional PDF report.
+
+> **Note:** This public demo is intended for fictional assessment samples only. Uploaded files are processed on the hosting server. Do not upload confidential company or customer information.
+
+Use fictional assessment data only.
+
 ## 📊 Evaluation results
 
 ![Approve](https://img.shields.io/badge/Approve-2-238636?style=flat-square)
