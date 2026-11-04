@@ -237,3 +237,31 @@ requirements.txt           Pinned project dependencies
 ---
 
 **Scope:** BIAI AI Engineer Round 2 — Task 1 only. Assessment data remains outside the public repository.
+
+
+## ☁️ Streamlit Community Cloud demo
+
+The BIAI-provided PDFs and `purchase-request.csv` are **not committed** to this
+public repository. When these local files are missing, the app switches to a
+cloud-safe demo screen. Upload both the **BIAI-provided purchase-request CSV**
+and **one BIAI supplier quotation PDF**. The existing fixed LangGraph workflow
+then produces the decision, cited findings, and a downloadable audit PDF.
+
+Cloud-mode CSV validation checks the expected headers, numeric fields, duplicate
+item codes, file size and row count. PDF validation checks structural and text
+requirements. Files are temporarily used during processing and are not deliberately
+saved by SupplierGuard. **Cloud uploads are processed on the hosting provider's
+server**, not on your computer. Do not upload real/confidential company or customer
+data. For this assessment, use only the fictional BIAI samples and controlled
+sample-derived copies.
+
+To deploy: go to https://share.streamlit.io, sign in with GitHub, create an app,
+and select `bilayet5821/SupplierGuard-AI`, branch `main`, entrypoint `app.py`.
+Select a compatible Python version under Advanced settings (prefer Python 3.11
+if offered). Dependencies are specified in `requirements.txt`. The public app
+URL is assigned by Streamlit once deployment succeeds.
+
+**Limitations:** The upload parser is intentionally restricted to BIAI-like,
+text-based single-item supplier quotation layouts. Unsupported, scanned,
+encrypted or unreadable documents are sent for human review. Automated
+approval never represents recorded purchase-order authorization.

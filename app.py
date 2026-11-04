@@ -32,6 +32,7 @@ from supplierguard.uploads import (  # noqa: E402
     evaluate_uploaded_pdf,
 )
 from supplierguard.workflow import run_workflow  # noqa: E402
+from supplierguard.cloud_demo import RequestValidationError, evaluate_cloud_upload  # noqa: E402
 
 
 DATA_DIR = (
@@ -273,14 +274,18 @@ def render_details(values: list[tuple[str, str | None]]) -> None:
 
 with st.sidebar:
     st.markdown("### SupplierGuard AI")
-    st.caption("Offline, deterministic procurement compliance")
-    source_mode = st.radio(
-        "Document source",
-        ["BIAI supplied samples", "Upload supplier PDF"],
-    )
+    st.caption("Deterministic procurement compliance")
     files = sorted(DATA_DIR.glob("supplier-pack-*.pdf"))
+    local_samples_available = bool(files) and PR_CSV.is_file()
+    source_options = (
+        ["BIAI supplied samples", "Upload supplier PDF"]
+        if local_samples_available
+        else ["Upload supplier PDF"]
+    )
+    source_mode = st.radio("Document source", source_options)
     selected = None
     uploaded_file = None
+    request_file = None
     if source_mode == "BIAI supplied samples":
         selected = st.selectbox(
             "Supplier pack",
@@ -288,6 +293,13 @@ with st.sidebar:
             format_func=lambda path: path.stem.replace("supplier-pack-", "Pack "),
         )
     else:
+        if not PR_CSV.is_file():
+            st.caption("Cloud demo: upload the fictional BIAI purchase request and supplier PDF. Uploaded files are processed on the hosting server. Do not use confidential data.")
+            request_file = st.file_uploader(
+                "Purchase request CSV",
+                type=["csv"],
+                help="Use the purchase-request.csv supplied in the BIAI Round 2 ZIP.",
+            )
         uploaded_file = st.file_uploader(
             "Supplier quotation PDF",
             type=["pdf"],
@@ -308,28 +320,41 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-st.markdown('<div class="sg-eyebrow">Aamar Garments Ltd · PR-2026-114</div>', unsafe_allow_html=True)
+st.markdown('<div class="sg-eyebrow">SupplierGuard AI · Procurement compliance demo</div>', unsafe_allow_html=True)
 st.title("Supplier Document Compliance Review")
 st.caption("Traceable decisions with page-level evidence. Missing or unclear values are never guessed.")
 
-if source_mode == "BIAI supplied samples" and not files:
-    st.error("No supplied Task 1 PDF files were found.")
+if source_mode == "BIAI supplied samples" and not local_samples_available:
+    st.error("The local BIAI sample files or purchase request are missing. Switch to upload mode.")
     st.stop()
 if source_mode == "Upload supplier PDF" and uploaded_file is None:
-    st.info("Upload a text-based supplier quotation PDF to begin. No file is stored permanently.")
+    st.info("Upload a supported BIAI supplier quotation PDF to begin.")
+    st.stop()
+if source_mode == "Upload supplier PDF" and not PR_CSV.is_file() and request_file is None:
+    st.info("Upload the BIAI purchase-request.csv to compare the quotation against its requested quantities and prices.")
     st.stop()
 
 with st.spinner("Running the fixed compliance workflow…"):
     upload_metadata = None
     if source_mode == "BIAI supplied samples":
         result = evaluate(str(selected))
+        purchase_request = load_purchase_request(PR_CSV)
     else:
         try:
-            uploaded = evaluate_upload(uploaded_file.getvalue(), uploaded_file.name)
-        except UploadValidationError as exc:
+            if PR_CSV.is_file():
+                uploaded = evaluate_upload(uploaded_file.getvalue(), uploaded_file.name)
+                purchase_request = load_purchase_request(PR_CSV)
+            else:
+                uploaded, purchase_request = evaluate_cloud_upload(
+                    uploaded_file.getvalue(),
+                    uploaded_file.name,
+                    request_file.getvalue(),
+                    request_file.name,
+                )
+        except (UploadValidationError, RequestValidationError) as exc:
             st.error(str(exc))
             st.warning(
-                "Result: Needs Human Review. SupplierGuard stopped before compliance validation because the file could not be interpreted reliably."
+                "Result: Needs Human Review. SupplierGuard stopped because the uploaded input could not be validated reliably."
             )
             st.stop()
         result = uploaded.result
@@ -338,7 +363,6 @@ with st.spinner("Running the fixed compliance workflow…"):
 pack = result.extracted
 multi_item_upload = bool(upload_metadata and upload_metadata.detected_item_rows > 1)
 item = pack.items[0] if len(pack.items) == 1 and not multi_item_upload else None
-purchase_request = load_purchase_request(PR_CSV)
 requested_item = purchase_request.get(item.item_code) if item else None
 recommendations = recommendations_for_result(result, purchase_request)
 details = issue_details(result, purchase_request)
